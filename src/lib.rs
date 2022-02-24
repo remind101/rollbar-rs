@@ -146,8 +146,6 @@ impl ToString for Level {
 }
 
 // https://rollbar.com/docs/api/items_post/
-const URL: &'static str = "http://errproxy.empire/api/1/item/";
-
 /// Builder for a generic request to Rollbar.
 pub struct ReportBuilder<'a> {
     client: &'a Client,
@@ -512,9 +510,10 @@ impl Client {
     /// Function used internally to send payloads to Rollbar as default `send_strategy`.
     fn send(&self, payload: String) -> thread::JoinHandle<Option<ResponseStatus>> {
         let body = hyper::Body::from(payload);
+        let url = std::env::var("ROLLBAR_ENDPOINT").unwrap_or("".to_string());
         let request = Request::builder()
             .method(Method::POST)
-            .uri(URL)
+            .uri(url)
             .body(body)
             .expect("Cannot build post request!");
 
