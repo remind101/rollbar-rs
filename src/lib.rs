@@ -146,7 +146,7 @@ impl ToString for Level {
 }
 
 // https://rollbar.com/docs/api/items_post/
-const URL: &'static str = "https://api.rollbar.com/api/1/item/";
+const URL: &'static str = "http://errproxy.empire/api/1/item/";
 
 /// Builder for a generic request to Rollbar.
 pub struct ReportBuilder<'a> {
@@ -655,7 +655,9 @@ mod tests {
         {
             let tx = Arc::new(Mutex::new(tx));
 
-            let client = Client::new("ACCESS_TOKEN", "ENVIRONMENT");
+            let access_token = std::env::var("ROLLBAR_ACCESS_TOKEN").unwrap_or("".to_string());
+            let environment = std::env::var("ROLLBAR_ENVIRONMENT").unwrap_or("".to_string());
+            let client = Client::new(access_token, environment);
             panic::set_hook(Box::new(move |panic_info| {
                 let backtrace = Backtrace::new();
                 let payload = client
@@ -687,9 +689,9 @@ mod tests {
 
         let mut payload: Value = serde_json::from_str(&*payload).unwrap();
         let mut expected_payload = json!({
-            "access_token": "ACCESS_TOKEN",
+            "access_token": "ROLLBAR_ACCESS_TOKEN",
             "data": {
-                "environment": "ENVIRONMENT",
+                "environment": "ROLLBAR_ENVIRONMENT",
                 "body": {
                     "trace": {
                         "frames": [{
@@ -697,8 +699,7 @@ mod tests {
                             "lineno": 268
                         }],
                         "exception": {
-                            "class": "<panic>",
-                            "message": "attempt to divide by zero",
+                            "class": "<panic>",                            "message": "attempt to divide by zero",
                             "description": "attempt to divide by zero"
                         }
                     }
@@ -746,7 +747,9 @@ mod tests {
 
     #[test]
     fn test_report_error() {
-        let client = Client::new("ACCESS_TOKEN", "ENVIRONMENT");
+        let access_token = std::env::var("ROLLBAR_ACCESS_TOKEN").unwrap_or("".to_string());
+        let environment = std::env::var("ROLLBAR_ENVIRONMENT").unwrap_or("".to_string());
+        let client = Client::new(access_token, environment);
 
         match "笑".parse::<i32>() {
             Ok(_) => {
@@ -763,9 +766,9 @@ mod tests {
                     .to_string();
 
                 let expected_payload = json!({
-                    "access_token": "ACCESS_TOKEN",
+                    "access_token": "ROLLBAR_ACCESS_TOKEN",
                     "data": {
-                        "environment": "ENVIRONMENT",
+                        "environment": "ROLLBAR_ENVIRONMENT",
                         "body": {
                             "trace": {
                                 "frames": [{
@@ -797,7 +800,9 @@ mod tests {
 
     #[test]
     fn test_report_message() {
-        let client = Client::new("ACCESS_TOKEN", "ENVIRONMENT");
+        let access_token = std::env::var("ROLLBAR_ACCESS_TOKEN").unwrap_or("".to_string());
+        let environment = std::env::var("ROLLBAR_ENVIRONMENT").unwrap_or("".to_string());
+        let client = Client::new(access_token, environment);
 
         let payload = client
             .build_report()
@@ -806,9 +811,9 @@ mod tests {
             .to_string();
 
         let expected_payload = json!({
-            "access_token": "ACCESS_TOKEN",
+            "access_token": "ROLLBAR_ACCESS_TOKEN",
             "data": {
-                "environment": "ENVIRONMENT",
+                "environment": "ROLLBAR_ENVIRONMENT",
                 "body": {
                     "message": {
                         "body": "hai"
@@ -824,7 +829,9 @@ mod tests {
 
     #[test]
     fn test_response() {
-        let client = Client::new("ACCESS_TOKEN", "ENVIRONMENT");
+        let access_token = std::env::var("ROLLBAR_ACCESS_TOKEN").unwrap_or("".to_string());
+        let environment = std::env::var("ROLLBAR_ENVIRONMENT").unwrap_or("".to_string());
+        let client = Client::new(access_token, environment);
 
         let status_handle = client
             .build_report()

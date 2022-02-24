@@ -3,7 +3,9 @@ extern crate rollbar;
 extern crate backtrace;
 
 fn main() {
-    let client = rollbar::Client::new("ACCESS_TOKEN", "ENVIRONMENT");
+    let access_token = std::env::var("ROLLBAR_ACCESS_TOKEN").unwrap_or("".to_string());
+    let environment = std::env::var("ROLLBAR_ENVIRONMENT").unwrap_or("".to_string());
+    let client = rollbar::Client::new(access_token, environment);
     report_panics!(client);
 
     /* // `report_panics!` expands to the following code:
