@@ -26,11 +26,14 @@ use tokio::runtime::current_thread;
 /// Report an error. Any type that implements `error::Error` is accepted.
 #[macro_export]
 macro_rules! report_error {
-    ($client:ident, $err:ident) => {{
+    ($err:ident) => {{
         let backtrace = $crate::backtrace::Backtrace::new();
         let line = line!() - 2;
+        let access_token = std::env::var("ROLLBAR_ACCESS_TOKEN").unwrap_or("".to_string());
+        let environment = std::env::var("ROLLBAR_ENVIRONMENT").unwrap_or("".to_string());
+        let client = rollbar::Client::new(access_token, environment);
 
-        $client
+        client
             .build_report()
             .from_error(&$err)
             .with_frame(
