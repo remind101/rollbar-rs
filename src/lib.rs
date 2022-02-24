@@ -26,11 +26,14 @@ use tokio::runtime::current_thread;
 /// Report an error. Any type that implements `error::Error` is accepted.
 #[macro_export]
 macro_rules! report_error {
-    ($client:ident, $err:ident) => {{
+    ($err:ident) => {{
         let backtrace = $crate::backtrace::Backtrace::new();
         let line = line!() - 2;
+        let access_token = std::env::var("ROLLBAR_ACCESS_TOKEN").unwrap_or("".to_string());
+        let environment = std::env::var("ROLLBAR_ENVIRONMENT").unwrap_or("".to_string());
+        let client = rollbar::Client::new(access_token, environment);
 
-        $client
+        client
             .build_report()
             .from_error(&$err)
             .with_frame(
@@ -68,10 +71,13 @@ macro_rules! report_error_message {
 /// Set a global hook for the `panic`s your application could raise.
 #[macro_export]
 macro_rules! report_panics {
-    ($client:ident) => {{
+    () => {{
         ::std::panic::set_hook(::std::boxed::Box::new(move |panic_info| {
+            let access_token = std::env::var("ROLLBAR_ACCESS_TOKEN").unwrap_or("".to_string());
+            let environment = std::env::var("ROLLBAR_ENVIRONMENT").unwrap_or("".to_string());
+            let client = rollbar::Client::new(access_token, environment);
             let backtrace = $crate::backtrace::Backtrace::new();
-            $client
+            client
                 .build_report()
                 .from_panic(panic_info)
                 .with_backtrace(&backtrace)
