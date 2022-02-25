@@ -25,7 +25,7 @@ use tokio::runtime::current_thread;
 
 
 #[derive(Clone)]
-struct BasicError {
+pub struct BasicError {
     description: String,
 }
 
