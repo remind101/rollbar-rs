@@ -50,7 +50,7 @@ impl error::Error for BasicError {
 /// Report an error. Any type that implements `error::Error` is accepted.
 #[macro_export]
 macro_rules! report_error {
-    ($err:expr) => {{
+    ($err:ident) => {{
         let backtrace = $crate::backtrace::Backtrace::new();
         let line = line!() - 2;
         let access_token = std::env::var("ROLLBAR_ACCESS_TOKEN").unwrap_or("".to_string());
@@ -75,7 +75,7 @@ macro_rules! report_error {
 
 // #[macro_export]
 // macro_rules! report_error {
-//     ($err:expr) => {{
+//     ($err:ident) => {{
 //         let backtrace = $crate::backtrace::Backtrace::new();
 //         let line = line!() - 2;
 //         let access_token = std::env::var("ROLLBAR_ACCESS_TOKEN").unwrap_or("".to_string());
