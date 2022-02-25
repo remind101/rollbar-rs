@@ -25,23 +25,31 @@ use tokio::runtime::current_thread;
 
 
 #[derive(Clone)]
-pub struct BasicError {
+pub struct ErrorMessage {
     description: String,
 }
 
-impl fmt::Display for BasicError {
+impl ErrorMessage {
+    pub fn new(new_description: &str) -> ErrorMessage {
+        ErrorMessage {
+            description: new_description.to_string(),
+        }
+    }
+}
+
+impl fmt::Display for ErrorMessage {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.description)
     }
 }
 
-impl fmt::Debug for BasicError {
+impl fmt::Debug for ErrorMessage {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "rollbar-rs BasicError {{ description: {} }}", self.description)
+        write!(f, "rollbar-rs ErrorMessage {{ description: {} }}", self.description)
     }
 }
 
-impl error::Error for BasicError {
+impl error::Error for ErrorMessage {
     fn description(&self) -> &str {
         &self.description
     }
@@ -57,11 +65,11 @@ macro_rules! report_error {
         let environment = std::env::var("ROLLBAR_ENVIRONMENT").unwrap_or("".to_string());
         let client = rollbar::Client::new(access_token, environment);
 
-        let basic_error = BasicError { description: $err.to_string() };
+        let error_message = ErrorMessage.new($err);
 
         client
             .build_report()
-            .from_error(&basic_error)
+            .from_error(&error_message)
             .with_frame(
                 ::rollbar::FrameBuilder::new()
                     .with_line_number(line)
