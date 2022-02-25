@@ -23,19 +23,45 @@ use hyper::{Method, Request};
 use hyper_tls::HttpsConnector;
 use tokio::runtime::current_thread;
 
+
+#[derive(Clone)]
+struct BasicError {
+    description: String,
+}
+
+impl fmt::Display for BasicError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.description)
+    }
+}
+
+impl fmt::Debug for BasicError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "rollbar-rs BasicError {{ description: {} }}", self.description)
+    }
+}
+
+impl error::Error for BasicError {
+    fn description(&self) -> &str {
+        &self.description
+    }
+}
+
 /// Report an error. Any type that implements `error::Error` is accepted.
 #[macro_export]
 macro_rules! report_error {
-    ($err:ident) => {{
+    ($err:expr) => {{
         let backtrace = $crate::backtrace::Backtrace::new();
         let line = line!() - 2;
         let access_token = std::env::var("ROLLBAR_ACCESS_TOKEN").unwrap_or("".to_string());
         let environment = std::env::var("ROLLBAR_ENVIRONMENT").unwrap_or("".to_string());
         let client = rollbar::Client::new(access_token, environment);
 
+        let basic_error = BasicError { description: $err.to_string() };
+
         client
             .build_report()
-            .from_error(&$err)
+            .from_error(&basic_error)
             .with_frame(
                 ::rollbar::FrameBuilder::new()
                     .with_line_number(line)
@@ -46,6 +72,29 @@ macro_rules! report_error {
             .send()
     }};
 }
+
+// #[macro_export]
+// macro_rules! report_error {
+//     ($err:expr) => {{
+//         let backtrace = $crate::backtrace::Backtrace::new();
+//         let line = line!() - 2;
+//         let access_token = std::env::var("ROLLBAR_ACCESS_TOKEN").unwrap_or("".to_string());
+//         let environment = std::env::var("ROLLBAR_ENVIRONMENT").unwrap_or("".to_string());
+//         let client = rollbar::Client::new(access_token, environment);
+//
+//         client
+//             .build_report()
+//             .from_error(&$err)
+//             .with_frame(
+//                 ::rollbar::FrameBuilder::new()
+//                     .with_line_number(line)
+//                     .with_file_name(file!())
+//                     .build(),
+//             )
+//             .with_backtrace(&backtrace)
+//             .send()
+//     }};
+// }
 
 /// Report an error message. Any type that implements `fmt::Display` is accepted.
 #[macro_export]
