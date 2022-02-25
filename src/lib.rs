@@ -81,29 +81,6 @@ macro_rules! report_error {
     }};
 }
 
-// #[macro_export]
-// macro_rules! report_error {
-//     ($err:ident) => {{
-//         let backtrace = $crate::backtrace::Backtrace::new();
-//         let line = line!() - 2;
-//         let access_token = std::env::var("ROLLBAR_ACCESS_TOKEN").unwrap_or("".to_string());
-//         let environment = std::env::var("ROLLBAR_ENVIRONMENT").unwrap_or("".to_string());
-//         let client = rollbar::Client::new(access_token, environment);
-//
-//         client
-//             .build_report()
-//             .from_error(&$err)
-//             .with_frame(
-//                 ::rollbar::FrameBuilder::new()
-//                     .with_line_number(line)
-//                     .with_file_name(file!())
-//                     .build(),
-//             )
-//             .with_backtrace(&backtrace)
-//             .send()
-//     }};
-// }
-
 /// Report an error message. Any type that implements `fmt::Display` is accepted.
 #[macro_export]
 macro_rules! report_error_message {
