@@ -65,7 +65,7 @@ macro_rules! report_error {
         let environment = std::env::var("ROLLBAR_ENVIRONMENT").unwrap_or("".to_string());
         let client = rollbar::Client::new(access_token, environment);
 
-        let error_message = ErrorMessage.new($err);
+        let error_message = ErrorMessage::new($err);
 
         client
             .build_report()
