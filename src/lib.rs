@@ -24,7 +24,7 @@ use hyper_tls::HttpsConnector;
 use tokio::runtime::current_thread;
 
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ErrorMessage {
     description: String,
 }
@@ -43,17 +43,21 @@ impl fmt::Display for ErrorMessage {
     }
 }
 
-impl fmt::Debug for ErrorMessage {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "rollbar-rs ErrorMessage {{ description: {} }}", self.description)
-    }
-}
-
 impl error::Error for ErrorMessage {
     fn description(&self) -> &str {
         &self.description
     }
 }
+
+// this might be how we could coerce async_graphql errors into ErrorMessages which implement std::error::Error
+// importing async_graphql into the rollbar lib doesnt make sense so we are not going this way for now
+// impl From<async_graphql::error> for ErrorMessage {
+//     fn from(error: async_graphql::Error) -> Self {
+//         ErrorMessage {
+//             description: error.message.clone(),
+//         }
+//     }
+// }
 
 /// Report an error. Any type that implements `error::Error` is accepted.
 #[macro_export]
@@ -248,7 +252,6 @@ pub struct FrameBuilder {
 }
 
 impl<'a> FrameBuilder {
-    /// Create a new FrameBuilder.
     pub fn new() -> Self {
         FrameBuilder {
             file_name: file!().to_owned(),
@@ -256,22 +259,22 @@ impl<'a> FrameBuilder {
         }
     }
 
-    /// Tell the origin of the error by adding the file name to the report.
+    // Tell the origin of the error by adding the file name to the report.
     pub fn with_file_name<T: Into<String>>(&'a mut self, file_name: T) -> &'a mut Self {
         self.file_name = file_name.into();
         self
     }
 
-    /// Set the number of the line in which an error occurred.
+    // Set the number of the line in which an error occurred.
     add_field!(with_line_number, line_number, u32);
 
-    /// Set the number of the column in which an error occurred.
+    // Set the number of the column in which an error occurred.
     add_field!(with_column_number, column_number, u32);
 
-    /// Set the method or the function name which caused caused the error.
+    // Set the method or the function name which caused caused the error.
     add_generic_field!(with_function_name, function_name, Into<String>);
 
-    /// Conclude the creation of the frame.
+    // Conclude the creation of the frame.
     pub fn build(&self) -> Self {
         self.to_owned()
     }
@@ -296,7 +299,7 @@ pub struct ReportErrorBuilder<'a> {
 }
 
 impl<'a> ReportErrorBuilder<'a> {
-    /// Attach a `backtrace::Backtrace` to the `description` of the report.
+    // Attach a `backtrace::Backtrace` to the `description` of the report.
     pub fn with_backtrace(&mut self, backtrace: &'a Backtrace) -> &mut Self {
         self.trace.frames.extend(
             backtrace
@@ -319,19 +322,19 @@ impl<'a> ReportErrorBuilder<'a> {
         self
     }
 
-    /// Add a new frame to the collection of stack frames.
+    // Add a new frame to the collection of stack frames.
     pub fn with_frame(&mut self, frame_builder: FrameBuilder) -> &mut Self {
         self.trace.frames.push(frame_builder);
         self
     }
 
-    /// Set the security level of the report. `Level::ERROR` is the default value.
+    // Set the security level of the report. `Level::ERROR` is the default value.
     add_generic_field!(with_level, level, Into<Level>);
 
-    /// Set the title to show in the dashboard for this report.
+    // Set the title to show in the dashboard for this report.
     add_generic_field!(with_title, title, Into<String>);
 
-    /// Send the report to Rollbar.
+    // Send the report to Rollbar.
     pub fn send(&mut self) -> thread::JoinHandle<Option<ResponseStatus>> {
         let client = self.report_builder.client;
 
@@ -372,18 +375,18 @@ impl<'a> ToString for ReportErrorBuilder<'a> {
 pub struct ReportMessageBuilder<'a> {
     report_builder: &'a ReportBuilder<'a>,
 
-    /// The message that must be reported.
+    // The message that must be reported.
     message: &'a str,
 
-    /// The severity level of the error. `Level::ERROR` is the default value.
+    // The severity level of the error. `Level::ERROR` is the default value.
     level: Option<Level>,
 }
 
 impl<'a> ReportMessageBuilder<'a> {
-    /// Set the security level of the report. `Level::ERROR` is the default value
+    // Set the security level of the report. `Level::ERROR` is the default value
     add_generic_field!(with_level, level, Into<Level>);
 
-    /// Send the message to Rollbar.
+    // Send the message to Rollbar.
     pub fn send(&mut self) -> thread::JoinHandle<Option<ResponseStatus>> {
         let client = self.report_builder.client;
 
@@ -447,7 +450,7 @@ impl<'a> ReportBuilder<'a> {
 
         ReportErrorBuilder {
             report_builder: self,
-            trace: trace,
+            trace,
             level: None,
             title: Some(message.to_owned()),
         }
@@ -458,14 +461,14 @@ impl<'a> ReportBuilder<'a> {
     pub fn from_error<E: error::Error>(&'a mut self, error: &'a E) -> ReportErrorBuilder<'a> {
         let mut trace = Trace::default();
         trace.exception.class = std::any::type_name::<E>().to_owned();
-        trace.exception.message = error.description().to_owned();
+        trace.exception.message = error.to_string().to_owned();
         trace.exception.description = error
             .source()
             .map_or_else(|| format!("{:?}", error), |c| format!("{:?}", c));
 
         ReportErrorBuilder {
             report_builder: self,
-            trace: trace,
+            trace,
             level: None,
             title: Some(format!("{}", error)),
         }
@@ -485,7 +488,7 @@ impl<'a> ReportBuilder<'a> {
 
         ReportErrorBuilder {
             report_builder: self,
-            trace: trace,
+            trace,
             level: None,
             title: Some(message),
         }
@@ -495,12 +498,12 @@ impl<'a> ReportBuilder<'a> {
     pub fn from_message(&'a mut self, message: &'a str) -> ReportMessageBuilder<'a> {
         ReportMessageBuilder {
             report_builder: self,
-            message: message,
+            message,
             level: None,
         }
     }
 
-    /// Use given function to send a request to Rollbar instead of the built-in one.
+    // Use given function to send a request to Rollbar instead of the built-in one.
     add_field!(
         with_send_strategy,
         send_strategy,
