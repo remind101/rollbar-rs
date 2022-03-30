@@ -15,6 +15,8 @@ extern crate tokio;
 use std::borrow::ToOwned;
 use std::sync::Arc;
 use std::{error, fmt, panic, thread};
+use std::collections::HashMap;
+use std::str::FromStr;
 
 use backtrace::Backtrace;
 //use hyper::client::HttpConnector;
@@ -22,6 +24,60 @@ use hyper::rt::Future;
 use hyper::{Method, Request};
 use hyper_tls::HttpsConnector;
 use tokio::runtime::current_thread;
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum HttpMethod {
+    Delete,
+    Get,
+    Head,
+    Patch,
+    Post,
+    Put,
+}
+
+impl FromStr for HttpMethod {
+    type Err = ();
+    fn from_str(method_str: &str) -> Result<HttpMethod, Self::Err> {
+        match method_str {
+            "DELETE"  => Ok(HttpMethod::Delete),
+            "GET"  => Ok(HttpMethod::Get),
+            "HEAD"  => Ok(HttpMethod::Head),
+            "PATCH" => Ok(HttpMethod::Patch),
+            "POST" => Ok(HttpMethod::Post),
+            "PUT" => Ok(HttpMethod::Put),
+            _      => Err(()),
+        }
+    }
+}
+
+impl fmt::Display for HttpMethod {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct HttpRequest {
+    headers: HashMap<String, String>,
+    method: HttpMethod,
+    url: String,
+}
+
+impl HttpRequest {
+    pub fn new(new_headers: &HashMap<String, String>, new_method: &str, new_url: &str) -> HttpRequest {
+        HttpRequest {
+            headers: new_headers.clone(),
+            method: HttpMethod::from_str(new_method).unwrap(),
+            url: new_url.to_string(),
+        }
+    }
+}
+
+impl fmt::Display for HttpRequest {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{} {}", self.method, self.url)
+    }
+}
 
 
 #[derive(Clone, Debug)]
