@@ -25,6 +25,7 @@ use hyper::{Method, Request};
 use hyper_tls::HttpsConnector;
 use tokio::runtime::current_thread;
 
+// there is a crate called strum that can do some of this enum string stuff for you
 #[derive(Clone, Debug, PartialEq)]
 pub enum HttpMethod {
     Delete,
@@ -39,13 +40,13 @@ impl FromStr for HttpMethod {
     type Err = ();
     fn from_str(method_str: &str) -> Result<HttpMethod, Self::Err> {
         match method_str {
-            "DELETE"  => Ok(HttpMethod::Delete),
-            "GET"  => Ok(HttpMethod::Get),
-            "HEAD"  => Ok(HttpMethod::Head),
+            "DELETE" => Ok(HttpMethod::Delete),
+            "GET" => Ok(HttpMethod::Get),
+            "HEAD" => Ok(HttpMethod::Head),
             "PATCH" => Ok(HttpMethod::Patch),
             "POST" => Ok(HttpMethod::Post),
             "PUT" => Ok(HttpMethod::Put),
-            _      => Err(()),
+            _  => Err(()),
         }
     }
 }
