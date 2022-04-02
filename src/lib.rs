@@ -11,75 +11,16 @@ extern crate serde_derive;
 extern crate serde_json;
 extern crate tokio;
 
-//use std::io::{self, Write};
 use std::borrow::ToOwned;
 use std::sync::Arc;
 use std::{error, fmt, panic, thread};
 use std::collections::HashMap;
-use std::str::FromStr;
 
 use backtrace::Backtrace;
-//use hyper::client::HttpConnector;
 use hyper::rt::Future;
 use hyper::{Method, Request};
 use hyper_tls::HttpsConnector;
 use tokio::runtime::current_thread;
-
-// there is a crate called strum that can do some of this enum string stuff for you
-#[derive(Clone, Debug, PartialEq)]
-pub enum HttpMethod {
-    Delete,
-    Get,
-    Head,
-    Patch,
-    Post,
-    Put,
-}
-
-impl FromStr for HttpMethod {
-    type Err = ();
-    fn from_str(method_str: &str) -> Result<HttpMethod, Self::Err> {
-        match method_str {
-            "DELETE" => Ok(HttpMethod::Delete),
-            "GET" => Ok(HttpMethod::Get),
-            "HEAD" => Ok(HttpMethod::Head),
-            "PATCH" => Ok(HttpMethod::Patch),
-            "POST" => Ok(HttpMethod::Post),
-            "PUT" => Ok(HttpMethod::Put),
-            _  => Err(()),
-        }
-    }
-}
-
-impl fmt::Display for HttpMethod {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct HttpRequest {
-    headers: HashMap<String, String>,
-    method: HttpMethod,
-    url: String,
-}
-
-impl HttpRequest {
-    pub fn new(new_headers: &HashMap<String, String>, new_method: &str, new_url: &str) -> HttpRequest {
-        HttpRequest {
-            headers: new_headers.clone(),
-            method: HttpMethod::from_str(new_method).unwrap(),
-            url: new_url.to_string(),
-        }
-    }
-}
-
-impl fmt::Display for HttpRequest {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{} {}", self.method, self.url)
-    }
-}
-
 
 #[derive(Clone, Debug)]
 pub struct ErrorMessage {
@@ -130,7 +71,33 @@ macro_rules! report_error {
 
         client
             .build_report()
-            .from_error(&error_message)
+            .from_error(&error_message, None)
+            .with_frame(
+                ::rollbar::FrameBuilder::new()
+                    .with_line_number(line)
+                    .with_file_name(file!())
+                    .build(),
+            )
+            .with_backtrace(&backtrace)
+            .send()
+    }};
+}
+
+/// Report an error. Any type that implements `error::Error` is accepted.
+#[macro_export]
+macro_rules! report_error_with_request {
+    ($err:ident, $request:ident) => {{
+        let backtrace = $crate::backtrace::Backtrace::new();
+        let line = line!() - 2;
+        let access_token = std::env::var("ROLLBAR_ACCESS_TOKEN").unwrap_or("".to_string());
+        let environment = std::env::var("ROLLBAR_ENVIRONMENT").unwrap_or("".to_string());
+        let client = rollbar::Client::new(access_token, environment);
+
+        let error_message = ErrorMessage::new($err);
+
+        client
+            .build_report()
+            .from_error(&error_message, Some($request))
             .with_frame(
                 ::rollbar::FrameBuilder::new()
                     .with_line_number(line)
@@ -285,6 +252,23 @@ impl Default for Exception {
     }
 }
 
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct HttpRequest {
+    headers: HashMap<String, String>,
+    method: String,
+    url: String,
+}
+
+impl HttpRequest {
+    pub fn new(new_headers: &HashMap<String, String>, new_method: &str, new_url: &str) -> HttpRequest {
+        HttpRequest {
+            headers: new_headers.clone(),
+            method: new_method.to_string(),
+            url: new_url.to_string(),
+        }
+    }
+}
+
 /// Builder for a frame. A collection of frames identifies a stack trace.
 #[derive(Serialize, Default, Clone, Debug)]
 pub struct FrameBuilder {
@@ -353,6 +337,10 @@ pub struct ReportErrorBuilder<'a> {
     /// The title shown in the dashboard for this report.
     #[serde(skip_serializing_if = "Option::is_none")]
     title: Option<String>,
+
+    /// The request that caused the error
+    #[serde(skip_serializing_if = "Option::is_none")]
+    request: Option<HttpRequest>,
 }
 
 impl<'a> ReportErrorBuilder<'a> {
@@ -421,7 +409,8 @@ impl<'a> ToString for ReportErrorBuilder<'a> {
                     .unwrap_or(Level::ERROR)
                     .to_string(),
                 "language": "rust",
-                "title": self.title
+                "title": self.title,
+                "request": self.request,
             }
         })
         .to_string()
@@ -510,12 +499,13 @@ impl<'a> ReportBuilder<'a> {
             trace,
             level: None,
             title: Some(message.to_owned()),
+            request: None
         }
     }
 
     // TODO: remove self?
     /// To be used when an `error::Error` must be reported.
-    pub fn from_error<E: error::Error>(&'a mut self, error: &'a E) -> ReportErrorBuilder<'a> {
+    pub fn from_error<E: error::Error>(&'a mut self, error: &'a E, request: Option<HttpRequest>) -> ReportErrorBuilder<'a> {
         let mut trace = Trace::default();
         trace.exception.class = std::any::type_name::<E>().to_owned();
         trace.exception.message = error.to_string().to_owned();
@@ -528,6 +518,7 @@ impl<'a> ReportBuilder<'a> {
             trace,
             level: None,
             title: Some(format!("{}", error)),
+            request,
         }
     }
 
@@ -548,6 +539,7 @@ impl<'a> ReportBuilder<'a> {
             trace,
             level: None,
             title: Some(message),
+            request: None,
         }
     }
 
