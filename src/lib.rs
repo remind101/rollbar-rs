@@ -71,7 +71,7 @@ macro_rules! report_error {
 
         client
             .build_report()
-            .from_error(&error_message, None)
+            .from_error(&error_message, None, None)
             .with_frame(
                 ::rollbar::FrameBuilder::new()
                     .with_line_number(line)
@@ -86,7 +86,7 @@ macro_rules! report_error {
 /// Report an error. Any type that implements `error::Error` is accepted.
 #[macro_export]
 macro_rules! report_error_with_request {
-    ($err:ident, $request:ident) => {{
+    ($err:ident, $request:ident, $custom:ident) => {{
         let backtrace = $crate::backtrace::Backtrace::new();
         let line = line!() - 2;
         let access_token = std::env::var("ROLLBAR_ACCESS_TOKEN").unwrap_or("".to_string());
@@ -97,7 +97,7 @@ macro_rules! report_error_with_request {
 
         client
             .build_report()
-            .from_error(&error_message, Some($request))
+            .from_error(&error_message, Some($request), Some($custom))
             .with_frame(
                 ::rollbar::FrameBuilder::new()
                     .with_line_number(line)
@@ -338,9 +338,13 @@ pub struct ReportErrorBuilder<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     title: Option<String>,
 
-    /// The request that caused the error
+    /// The request that caused the error.
     #[serde(skip_serializing_if = "Option::is_none")]
     request: Option<HttpRequest>,
+
+    /// Custom metadata.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    custom: Option<serde_json::Value>,
 }
 
 impl<'a> ReportErrorBuilder<'a> {
@@ -411,6 +415,7 @@ impl<'a> ToString for ReportErrorBuilder<'a> {
                 "language": "rust",
                 "title": self.title,
                 "request": self.request,
+                "custom": self.custom,
             }
         })
         .to_string()
@@ -499,16 +504,17 @@ impl<'a> ReportBuilder<'a> {
             trace,
             level: None,
             title: Some(message.to_owned()),
-            request: None
+            request: None,
+            custom: None
         }
     }
 
     // TODO: remove self?
     /// To be used when an `error::Error` must be reported.
-    pub fn from_error<E: error::Error>(&'a mut self, error: &'a E, request: Option<HttpRequest>) -> ReportErrorBuilder<'a> {
+    pub fn from_error<E: error::Error>(&'a mut self, error: &'a E, request: Option<HttpRequest>, custom: Option<serde_json::Value>) -> ReportErrorBuilder<'a> {
         let mut trace = Trace::default();
         trace.exception.class = std::any::type_name::<E>().to_owned();
-        trace.exception.message = error.to_string().to_owned();
+        trace.exception.message = error.to_string();
         trace.exception.description = error
             .source()
             .map_or_else(|| format!("{:?}", error), |c| format!("{:?}", c));
@@ -519,6 +525,7 @@ impl<'a> ReportBuilder<'a> {
             level: None,
             title: Some(format!("{}", error)),
             request,
+            custom
         }
     }
 
@@ -540,6 +547,7 @@ impl<'a> ReportBuilder<'a> {
             level: None,
             title: Some(message),
             request: None,
+            custom: None
         }
     }
 
@@ -602,7 +610,7 @@ impl Client {
     /// Function used internally to send payloads to Rollbar as default `send_strategy`.
     fn send(&self, payload: String) -> thread::JoinHandle<Option<ResponseStatus>> {
         let body = hyper::Body::from(payload);
-        let url = std::env::var("ROLLBAR_ENDPOINT").unwrap_or("".to_string());
+        let url = std::env::var("ROLLBAR_ENDPOINT").unwrap_or_else(|_| "".to_string());
         let request = Request::builder()
             .method(Method::POST)
             .uri(url)
@@ -799,7 +807,8 @@ mod tests {
                 "level": "info",
                 "language": "rust",
                 "title": "attempt to divide by zero",
-                "request": null
+                "request": null,
+                "custom": null
             }
         });
 
@@ -881,7 +890,8 @@ mod tests {
                         "level": "warning",
                         "language": "rust",
                         "title": "w",
-                        "request": null
+                        "request": null,
+                        "custom": null
                     }
                 });
 
@@ -913,9 +923,10 @@ mod tests {
                     "GET",
                     "/the/planets",
                 );
+                let custom = json!(originating_request);
                 let payload = client
                     .build_report()
-                    .from_error(&e, Some(originating_request))
+                    .from_error(&e, Some(originating_request), Some(custom))
                     .with_level(Level::WARNING)
                     .with_frame(FrameBuilder::new().with_column_number(42).build())
                     .with_frame(FrameBuilder::new().with_column_number(24).build())
@@ -946,6 +957,16 @@ mod tests {
                         "language": "rust",
                         "title": "w",
                         "request": {
+                            "headers": {
+                                "Earth": "just right",
+                                "Mars": "doom",
+                                "Mercury": "tiny",
+                                "Venus": "hot"
+                            },
+                            "method": "GET",
+                            "url": "/the/planets"
+                        },
+                        "custom": {
                             "headers": {
                                 "Earth": "just right",
                                 "Mars": "doom",
@@ -997,8 +1018,8 @@ mod tests {
     #[test]
     fn test_response() {
         std::env::set_var("ROLLBAR_ENDPOINT", "https://api.rollbar.com/api/1/item/");
-        std::env::set_var("ROLLBAR_ACCESS_TOKEN", "fake");
-        std::env::set_var("ROLLBAR_ENVIRONMENT", "fake");
+        std::env::set_var("ROLLBAR_ACCESS_TOKEN", "ROLLBAR_ACCESS_TOKEN");
+        std::env::set_var("ROLLBAR_ENVIRONMENT", "ROLLBAR_ENVIRONMENT");
         let access_token = std::env::var("ROLLBAR_ACCESS_TOKEN").unwrap_or("".to_string());
         let environment = std::env::var("ROLLBAR_ENVIRONMENT").unwrap_or("".to_string());
         let client = Client::new(access_token, environment);
