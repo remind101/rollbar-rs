@@ -678,6 +678,7 @@ mod tests {
     extern crate hyper;
     extern crate serde_json;
 
+    use std::collections::HashMap;
     use std::panic;
     use std::sync::mpsc::channel;
     use std::sync::{Arc, Mutex};
@@ -746,8 +747,8 @@ mod tests {
         {
             let tx = Arc::new(Mutex::new(tx));
 
-            let access_token = std::env::var("ROLLBAR_ACCESS_TOKEN").unwrap_or("".to_string());
-            let environment = std::env::var("ROLLBAR_ENVIRONMENT").unwrap_or("".to_string());
+            let access_token = std::env::var("ROLLBAR_ACCESS_TOKEN").unwrap_or_else(|_| "ROLLBAR_ACCESS_TOKEN".to_string());
+            let environment = std::env::var("ROLLBAR_ENVIRONMENT").unwrap_or_else(|_| "ROLLBAR_ENVIRONMENT".to_string());
             let client = Client::new(access_token, environment);
             panic::set_hook(Box::new(move |panic_info| {
                 let backtrace = Backtrace::new();
@@ -797,7 +798,8 @@ mod tests {
                 },
                 "level": "info",
                 "language": "rust",
-                "title": "attempt to divide by zero"
+                "title": "attempt to divide by zero",
+                "request": null
             }
         });
 
@@ -838,8 +840,8 @@ mod tests {
 
     #[test]
     fn test_report_error() {
-        let access_token = std::env::var("ROLLBAR_ACCESS_TOKEN").unwrap_or("".to_string());
-        let environment = std::env::var("ROLLBAR_ENVIRONMENT").unwrap_or("".to_string());
+        let access_token = std::env::var("ROLLBAR_ACCESS_TOKEN").unwrap_or_else(|_| "ROLLBAR_ACCESS_TOKEN".to_string());
+        let environment = std::env::var("ROLLBAR_ENVIRONMENT").unwrap_or_else(|_| "ROLLBAR_ENVIRONMENT".to_string());
         let client = Client::new(access_token, environment);
 
         match "笑".parse::<i32>() {
@@ -870,7 +872,7 @@ mod tests {
                                     "colno": 24
                                 }],
                                 "exception": {
-                                    "class": "core::num::ParseIntError",
+                                    "class": "core::num::error::ParseIntError",
                                     "message": "invalid digit found in string",
                                     "description": "invalid digit found in string"
                                 }
@@ -878,7 +880,81 @@ mod tests {
                         },
                         "level": "warning",
                         "language": "rust",
-                        "title": "w"
+                        "title": "w",
+                        "request": null
+                    }
+                });
+
+                let mut payload: Value = serde_json::from_str(&*payload).unwrap();
+                normalize_frames!(payload, expected_payload, 2);
+                assert_eq!(expected_payload.to_string(), payload.to_string());
+            }
+        }
+    }
+
+    #[test]
+    fn test_report_error_with_request() {
+        let access_token = std::env::var("ROLLBAR_ACCESS_TOKEN").unwrap_or_else(|_| "ROLLBAR_ACCESS_TOKEN".to_string());
+        let environment = std::env::var("ROLLBAR_ENVIRONMENT").unwrap_or_else(|_| "ROLLBAR_ENVIRONMENT".to_string());
+        let client = Client::new(access_token, environment);
+
+        match "笑".parse::<i32>() {
+            Ok(_) => {
+                assert!(false);
+            }
+            Err(e) => {
+                let originating_request = crate::HttpRequest::new(
+                    &HashMap::from([
+                        ("Mercury".to_owned(), "tiny".to_owned()),
+                        ("Venus".to_owned(), "hot".to_owned()),
+                        ("Earth".to_owned(), "just right".to_owned()),
+                        ("Mars".to_owned(), "doom".to_owned()),
+                    ]),
+                    "GET",
+                    "/the/planets",
+                );
+                let payload = client
+                    .build_report()
+                    .from_error(&e, Some(originating_request))
+                    .with_level(Level::WARNING)
+                    .with_frame(FrameBuilder::new().with_column_number(42).build())
+                    .with_frame(FrameBuilder::new().with_column_number(24).build())
+                    .with_title("w")
+                    .to_string();
+
+                let expected_payload = json!({
+                    "access_token": "ROLLBAR_ACCESS_TOKEN",
+                    "data": {
+                        "environment": "ROLLBAR_ENVIRONMENT",
+                        "body": {
+                            "trace": {
+                                "frames": [{
+                                    "filename": "src/lib.rs",
+                                    "colno": 42
+                                }, {
+                                    "filename": "src/lib.rs",
+                                    "colno": 24
+                                }],
+                                "exception": {
+                                    "class": "core::num::error::ParseIntError",
+                                    "message": "invalid digit found in string",
+                                    "description": "ParseIntError { kind: InvalidDigit }"
+                                }
+                            }
+                        },
+                        "level": "warning",
+                        "language": "rust",
+                        "title": "w",
+                        "request": {
+                            "headers": {
+                                "Earth": "just right",
+                                "Mars": "doom",
+                                "Mercury": "tiny",
+                                "Venus": "hot"
+                            },
+                            "method": "GET",
+                            "url": "/the/planets"
+                        }
                     }
                 });
 
@@ -891,8 +967,8 @@ mod tests {
 
     #[test]
     fn test_report_message() {
-        let access_token = std::env::var("ROLLBAR_ACCESS_TOKEN").unwrap_or("".to_string());
-        let environment = std::env::var("ROLLBAR_ENVIRONMENT").unwrap_or("".to_string());
+        let access_token = std::env::var("ROLLBAR_ACCESS_TOKEN").unwrap_or_else(|_| "ROLLBAR_ACCESS_TOKEN".to_string());
+        let environment = std::env::var("ROLLBAR_ENVIRONMENT").unwrap_or_else(|_| "ROLLBAR_ENVIRONMENT".to_string());
         let client = Client::new(access_token, environment);
 
         let payload = client
@@ -920,6 +996,9 @@ mod tests {
 
     #[test]
     fn test_response() {
+        std::env::set_var("ROLLBAR_ENDPOINT", "https://api.rollbar.com/api/1/item/");
+        std::env::set_var("ROLLBAR_ACCESS_TOKEN", "fake");
+        std::env::set_var("ROLLBAR_ENVIRONMENT", "fake");
         let access_token = std::env::var("ROLLBAR_ACCESS_TOKEN").unwrap_or("".to_string());
         let environment = std::env::var("ROLLBAR_ENVIRONMENT").unwrap_or("".to_string());
         let client = Client::new(access_token, environment);
