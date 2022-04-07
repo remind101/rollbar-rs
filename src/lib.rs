@@ -47,16 +47,6 @@ impl error::Error for ErrorMessage {
     }
 }
 
-// this might be how we could coerce async_graphql errors into ErrorMessages which implement std::error::Error
-// importing async_graphql into the rollbar lib doesnt make sense so we are not going this way for now
-// impl From<async_graphql::error> for ErrorMessage {
-//     fn from(error: async_graphql::Error) -> Self {
-//         ErrorMessage {
-//             description: error.message.clone(),
-//         }
-//     }
-// }
-
 /// Report an error. Any type that implements `error::Error` is accepted.
 #[macro_export]
 macro_rules! report_error {
@@ -83,7 +73,10 @@ macro_rules! report_error {
     }};
 }
 
-/// Report an error. Any type that implements `error::Error` is accepted.
+/// Report an error via a string, with the request, and custom data.
+/// TODO: Unfortunately Rollbar seems to drop "request" even though it matches documentation
+/// https://explorer.docs.rollbar.com/#operation/create-item
+/// In the interum passing "request" into "custom" does work.
 #[macro_export]
 macro_rules! report_error_with_request {
     ($err:ident, $request:ident, $custom:ident) => {{
