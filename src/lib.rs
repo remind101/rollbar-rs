@@ -57,11 +57,9 @@ macro_rules! report_error {
         let environment = std::env::var("ROLLBAR_ENVIRONMENT").unwrap_or("".to_string());
         let client = rollbar::Client::new(access_token, environment);
 
-        let error_message = ErrorMessage::new($err);
-
         client
             .build_report()
-            .from_error(&error_message, None, None)
+            .from_error(&$err, None, None)
             .with_frame(
                 ::rollbar::FrameBuilder::new()
                     .with_line_number(line)
@@ -73,33 +71,36 @@ macro_rules! report_error {
     }};
 }
 
-/// Report an error via a string, with the request, and custom data.
+/// Report an error string, with the request, and custom data.
 /// TODO: Unfortunately Rollbar seems to drop "request" even though it matches documentation
 /// https://explorer.docs.rollbar.com/#operation/create-item
 /// In the interum passing "request" into "custom" does work.
 #[macro_export]
 macro_rules! report_error_with_request {
-    ($err:ident, $request:ident, $custom:ident) => {{
+    ($err:ident, $request:expr, $custom:expr) => {{
         let backtrace = $crate::backtrace::Backtrace::new();
-        let line = line!() - 2;
+        let line = line!();
         let access_token = std::env::var("ROLLBAR_ACCESS_TOKEN").unwrap_or("".to_string());
         let environment = std::env::var("ROLLBAR_ENVIRONMENT").unwrap_or("".to_string());
         let client = rollbar::Client::new(access_token, environment);
-
-        let error_message = ErrorMessage::new($err);
-
-        client
-            .build_report()
-            .from_error(&error_message, Some($request), Some($custom))
-            .with_frame(
-                ::rollbar::FrameBuilder::new()
-                    .with_line_number(line)
-                    .with_file_name(file!())
-                    .build(),
-            )
-            .with_backtrace(&backtrace)
-            .send()
+        $crate::build_and_send_report(client, $err, $request, $custom, line, backtrace)
     }};
+}
+
+pub fn build_and_send_report(client: Client, err: &str, request: Option<HttpRequestData>, custom: Option<serde_json::Value>, line: u32, backtrace: Backtrace) -> thread::JoinHandle<Option<ResponseStatus>> {
+    let error_message = ErrorMessage::new(err);
+
+    client
+        .build_report()
+        .from_error(&error_message, request, custom)
+        .with_frame(
+            FrameBuilder::new()
+                .with_line_number(line)
+                .with_file_name(file!())
+                .build(),
+        )
+        .with_backtrace(&backtrace)
+        .send()
 }
 
 /// Report an error message. Any type that implements `fmt::Display` is accepted.
@@ -196,12 +197,12 @@ impl<'a> From<&'a str> for Level {
 
 impl ToString for Level {
     fn to_string(&self) -> String {
-        match self {
-            &Level::CRITICAL => "critical".to_string(),
-            &Level::ERROR => "error".to_string(),
-            &Level::WARNING => "warning".to_string(),
-            &Level::INFO => "info".to_string(),
-            &Level::DEBUG => "debug".to_string(),
+        match *self {
+            Level::CRITICAL => "critical".to_string(),
+            Level::ERROR => "error".to_string(),
+            Level::WARNING => "warning".to_string(),
+            Level::INFO => "info".to_string(),
+            Level::DEBUG => "debug".to_string(),
         }
     }
 }
@@ -246,15 +247,15 @@ impl Default for Exception {
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
-pub struct HttpRequest {
+pub struct HttpRequestData {
     headers: HashMap<String, String>,
     method: String,
     url: String,
 }
 
-impl HttpRequest {
-    pub fn new(new_headers: &HashMap<String, String>, new_method: &str, new_url: &str) -> HttpRequest {
-        HttpRequest {
+impl HttpRequestData {
+    pub fn new(new_headers: &HashMap<String, String>, new_method: &str, new_url: &str) -> HttpRequestData {
+        HttpRequestData {
             headers: new_headers.clone(),
             method: new_method.to_string(),
             url: new_url.to_string(),
@@ -333,7 +334,7 @@ pub struct ReportErrorBuilder<'a> {
 
     /// The request that caused the error.
     #[serde(skip_serializing_if = "Option::is_none")]
-    request: Option<HttpRequest>,
+    request: Option<HttpRequestData>,
 
     /// Custom metadata.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -504,7 +505,7 @@ impl<'a> ReportBuilder<'a> {
 
     // TODO: remove self?
     /// To be used when an `error::Error` must be reported.
-    pub fn from_error<E: error::Error>(&'a mut self, error: &'a E, request: Option<HttpRequest>, custom: Option<serde_json::Value>) -> ReportErrorBuilder<'a> {
+    pub fn from_error<E: error::Error>(&'a mut self, error: &'a E, request: Option<HttpRequestData>, custom: Option<serde_json::Value>) -> ReportErrorBuilder<'a> {
         let mut trace = Trace::default();
         trace.exception.class = std::any::type_name::<E>().to_owned();
         trace.exception.message = error.to_string();
@@ -848,7 +849,7 @@ mod tests {
 
         match "笑".parse::<i32>() {
             Ok(_) => {
-                assert!(false);
+                unreachable!();
             }
             Err(e) => {
                 let payload = client
@@ -903,10 +904,10 @@ mod tests {
 
         match "笑".parse::<i32>() {
             Ok(_) => {
-                assert!(false);
+                unreachable!();
             }
             Err(e) => {
-                let originating_request = crate::HttpRequest::new(
+                let originating_request = crate::HttpRequestData::new(
                     &HashMap::from([
                         ("Mercury".to_owned(), "tiny".to_owned()),
                         ("Venus".to_owned(), "hot".to_owned()),
@@ -1013,8 +1014,8 @@ mod tests {
         std::env::set_var("ROLLBAR_ENDPOINT", "https://api.rollbar.com/api/1/item/");
         std::env::set_var("ROLLBAR_ACCESS_TOKEN", "ROLLBAR_ACCESS_TOKEN");
         std::env::set_var("ROLLBAR_ENVIRONMENT", "ROLLBAR_ENVIRONMENT");
-        let access_token = std::env::var("ROLLBAR_ACCESS_TOKEN").unwrap_or("".to_string());
-        let environment = std::env::var("ROLLBAR_ENVIRONMENT").unwrap_or("".to_string());
+        let access_token = std::env::var("ROLLBAR_ACCESS_TOKEN").unwrap_or_else(|_| "".to_string());
+        let environment = std::env::var("ROLLBAR_ENVIRONMENT").unwrap_or_else(|_| "".to_string());
         let client = Client::new(access_token, environment);
 
         let status_handle = client
@@ -1031,7 +1032,7 @@ mod tests {
                 );
             }
             None => {
-                assert!(false);
+                unreachable!();
             }
         }
     }
