@@ -50,7 +50,7 @@ impl error::Error for ErrorMessage {
 /// Report an error. Any type that implements `error::Error` is accepted.
 #[macro_export]
 macro_rules! report_error {
-    ($err:ident) => {{
+    ($err:expr) => {{
         let backtrace = $crate::backtrace::Backtrace::new();
         let line = line!() - 2;
         let access_token = std::env::var("ROLLBAR_ACCESS_TOKEN").unwrap_or("".to_string());
@@ -71,36 +71,50 @@ macro_rules! report_error {
     }};
 }
 
-/// Report an error string, with the request, and custom data.
+/// Report an error string.
+#[macro_export]
+macro_rules! report_error_string {
+    ($err:expr) => {{
+        $crate::report_error!($crate::ErrorMessage::new($err))
+    }};
+}
+
+/// Report an error, with the request, and custom data.
 /// TODO: Unfortunately Rollbar seems to drop "request" even though it matches documentation
 /// https://explorer.docs.rollbar.com/#operation/create-item
 /// In the interum passing "request" into "custom" does work.
 #[macro_export]
 macro_rules! report_error_with_request {
-    ($err:ident, $request:expr, $custom:expr) => {{
+    ($err:expr, $request:expr, $custom:expr) => {{
         let backtrace = $crate::backtrace::Backtrace::new();
         let line = line!();
         let access_token = std::env::var("ROLLBAR_ACCESS_TOKEN").unwrap_or("".to_string());
         let environment = std::env::var("ROLLBAR_ENVIRONMENT").unwrap_or("".to_string());
         let client = rollbar::Client::new(access_token, environment);
-        $crate::build_and_send_report(client, $err, $request, $custom, line, backtrace)
+
+        client
+            .build_report()
+            .from_error(&$err, $request, $custom)
+            .with_frame(
+                ::rollbar::FrameBuilder::new()
+                    .with_line_number(line)
+                    .with_file_name(file!())
+                    .build(),
+            )
+            .with_backtrace(&backtrace)
+            .send()
     }};
 }
 
-pub fn build_and_send_report(client: Client, err: &str, request: Option<HttpRequestData>, custom: Option<serde_json::Value>, line: u32, backtrace: Backtrace) -> thread::JoinHandle<Option<ResponseStatus>> {
-    let error_message = ErrorMessage::new(err);
-
-    client
-        .build_report()
-        .from_error(&error_message, request, custom)
-        .with_frame(
-            FrameBuilder::new()
-                .with_line_number(line)
-                .with_file_name(file!())
-                .build(),
-        )
-        .with_backtrace(&backtrace)
-        .send()
+/// Report an error string, with the request, and custom data.
+/// TODO: Unfortunately Rollbar seems to drop "request" even though it matches documentation
+/// https://explorer.docs.rollbar.com/#operation/create-item
+/// In the interum passing "request" into "custom" does work.
+#[macro_export]
+macro_rules! report_error_string_with_request {
+    ($err:expr, $request:expr, $custom:expr) => {{
+        $crate::report_error_with_request!($crate::ErrorMessage::new($err), $request, $custom)
+    }};
 }
 
 /// Report an error message. Any type that implements `fmt::Display` is accepted.
