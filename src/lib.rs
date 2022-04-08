@@ -11,18 +11,16 @@ extern crate serde_derive;
 extern crate serde_json;
 extern crate tokio;
 
-//use std::io::{self, Write};
 use std::borrow::ToOwned;
 use std::sync::Arc;
 use std::{error, fmt, panic, thread};
+use std::collections::HashMap;
 
 use backtrace::Backtrace;
-//use hyper::client::HttpConnector;
 use hyper::rt::Future;
 use hyper::{Method, Request};
 use hyper_tls::HttpsConnector;
 use tokio::runtime::current_thread;
-
 
 #[derive(Clone, Debug)]
 pub struct ErrorMessage {
@@ -49,16 +47,6 @@ impl error::Error for ErrorMessage {
     }
 }
 
-// this might be how we could coerce async_graphql errors into ErrorMessages which implement std::error::Error
-// importing async_graphql into the rollbar lib doesnt make sense so we are not going this way for now
-// impl From<async_graphql::error> for ErrorMessage {
-//     fn from(error: async_graphql::Error) -> Self {
-//         ErrorMessage {
-//             description: error.message.clone(),
-//         }
-//     }
-// }
-
 /// Report an error. Any type that implements `error::Error` is accepted.
 #[macro_export]
 macro_rules! report_error {
@@ -73,7 +61,36 @@ macro_rules! report_error {
 
         client
             .build_report()
-            .from_error(&error_message)
+            .from_error(&error_message, None, None)
+            .with_frame(
+                ::rollbar::FrameBuilder::new()
+                    .with_line_number(line)
+                    .with_file_name(file!())
+                    .build(),
+            )
+            .with_backtrace(&backtrace)
+            .send()
+    }};
+}
+
+/// Report an error via a string, with the request, and custom data.
+/// TODO: Unfortunately Rollbar seems to drop "request" even though it matches documentation
+/// https://explorer.docs.rollbar.com/#operation/create-item
+/// In the interum passing "request" into "custom" does work.
+#[macro_export]
+macro_rules! report_error_with_request {
+    ($err:ident, $request:ident, $custom:ident) => {{
+        let backtrace = $crate::backtrace::Backtrace::new();
+        let line = line!() - 2;
+        let access_token = std::env::var("ROLLBAR_ACCESS_TOKEN").unwrap_or("".to_string());
+        let environment = std::env::var("ROLLBAR_ENVIRONMENT").unwrap_or("".to_string());
+        let client = rollbar::Client::new(access_token, environment);
+
+        let error_message = ErrorMessage::new($err);
+
+        client
+            .build_report()
+            .from_error(&error_message, Some($request), Some($custom))
             .with_frame(
                 ::rollbar::FrameBuilder::new()
                     .with_line_number(line)
@@ -228,6 +245,23 @@ impl Default for Exception {
     }
 }
 
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct HttpRequest {
+    headers: HashMap<String, String>,
+    method: String,
+    url: String,
+}
+
+impl HttpRequest {
+    pub fn new(new_headers: &HashMap<String, String>, new_method: &str, new_url: &str) -> HttpRequest {
+        HttpRequest {
+            headers: new_headers.clone(),
+            method: new_method.to_string(),
+            url: new_url.to_string(),
+        }
+    }
+}
+
 /// Builder for a frame. A collection of frames identifies a stack trace.
 #[derive(Serialize, Default, Clone, Debug)]
 pub struct FrameBuilder {
@@ -296,6 +330,14 @@ pub struct ReportErrorBuilder<'a> {
     /// The title shown in the dashboard for this report.
     #[serde(skip_serializing_if = "Option::is_none")]
     title: Option<String>,
+
+    /// The request that caused the error.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    request: Option<HttpRequest>,
+
+    /// Custom metadata.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    custom: Option<serde_json::Value>,
 }
 
 impl<'a> ReportErrorBuilder<'a> {
@@ -364,7 +406,9 @@ impl<'a> ToString for ReportErrorBuilder<'a> {
                     .unwrap_or(Level::ERROR)
                     .to_string(),
                 "language": "rust",
-                "title": self.title
+                "title": self.title,
+                "request": self.request,
+                "custom": self.custom,
             }
         })
         .to_string()
@@ -453,15 +497,17 @@ impl<'a> ReportBuilder<'a> {
             trace,
             level: None,
             title: Some(message.to_owned()),
+            request: None,
+            custom: None
         }
     }
 
     // TODO: remove self?
     /// To be used when an `error::Error` must be reported.
-    pub fn from_error<E: error::Error>(&'a mut self, error: &'a E) -> ReportErrorBuilder<'a> {
+    pub fn from_error<E: error::Error>(&'a mut self, error: &'a E, request: Option<HttpRequest>, custom: Option<serde_json::Value>) -> ReportErrorBuilder<'a> {
         let mut trace = Trace::default();
         trace.exception.class = std::any::type_name::<E>().to_owned();
-        trace.exception.message = error.to_string().to_owned();
+        trace.exception.message = error.to_string();
         trace.exception.description = error
             .source()
             .map_or_else(|| format!("{:?}", error), |c| format!("{:?}", c));
@@ -471,6 +517,8 @@ impl<'a> ReportBuilder<'a> {
             trace,
             level: None,
             title: Some(format!("{}", error)),
+            request,
+            custom
         }
     }
 
@@ -491,6 +539,8 @@ impl<'a> ReportBuilder<'a> {
             trace,
             level: None,
             title: Some(message),
+            request: None,
+            custom: None
         }
     }
 
@@ -553,7 +603,7 @@ impl Client {
     /// Function used internally to send payloads to Rollbar as default `send_strategy`.
     fn send(&self, payload: String) -> thread::JoinHandle<Option<ResponseStatus>> {
         let body = hyper::Body::from(payload);
-        let url = std::env::var("ROLLBAR_ENDPOINT").unwrap_or("".to_string());
+        let url = std::env::var("ROLLBAR_ENDPOINT").unwrap_or_else(|_| "".to_string());
         let request = Request::builder()
             .method(Method::POST)
             .uri(url)
@@ -629,6 +679,7 @@ mod tests {
     extern crate hyper;
     extern crate serde_json;
 
+    use std::collections::HashMap;
     use std::panic;
     use std::sync::mpsc::channel;
     use std::sync::{Arc, Mutex};
@@ -697,8 +748,8 @@ mod tests {
         {
             let tx = Arc::new(Mutex::new(tx));
 
-            let access_token = std::env::var("ROLLBAR_ACCESS_TOKEN").unwrap_or("".to_string());
-            let environment = std::env::var("ROLLBAR_ENVIRONMENT").unwrap_or("".to_string());
+            let access_token = std::env::var("ROLLBAR_ACCESS_TOKEN").unwrap_or_else(|_| "ROLLBAR_ACCESS_TOKEN".to_string());
+            let environment = std::env::var("ROLLBAR_ENVIRONMENT").unwrap_or_else(|_| "ROLLBAR_ENVIRONMENT".to_string());
             let client = Client::new(access_token, environment);
             panic::set_hook(Box::new(move |panic_info| {
                 let backtrace = Backtrace::new();
@@ -748,7 +799,9 @@ mod tests {
                 },
                 "level": "info",
                 "language": "rust",
-                "title": "attempt to divide by zero"
+                "title": "attempt to divide by zero",
+                "request": null,
+                "custom": null
             }
         });
 
@@ -789,8 +842,8 @@ mod tests {
 
     #[test]
     fn test_report_error() {
-        let access_token = std::env::var("ROLLBAR_ACCESS_TOKEN").unwrap_or("".to_string());
-        let environment = std::env::var("ROLLBAR_ENVIRONMENT").unwrap_or("".to_string());
+        let access_token = std::env::var("ROLLBAR_ACCESS_TOKEN").unwrap_or_else(|_| "ROLLBAR_ACCESS_TOKEN".to_string());
+        let environment = std::env::var("ROLLBAR_ENVIRONMENT").unwrap_or_else(|_| "ROLLBAR_ENVIRONMENT".to_string());
         let client = Client::new(access_token, environment);
 
         match "笑".parse::<i32>() {
@@ -821,7 +874,7 @@ mod tests {
                                     "colno": 24
                                 }],
                                 "exception": {
-                                    "class": "core::num::ParseIntError",
+                                    "class": "core::num::error::ParseIntError",
                                     "message": "invalid digit found in string",
                                     "description": "invalid digit found in string"
                                 }
@@ -829,7 +882,93 @@ mod tests {
                         },
                         "level": "warning",
                         "language": "rust",
-                        "title": "w"
+                        "title": "w",
+                        "request": null,
+                        "custom": null
+                    }
+                });
+
+                let mut payload: Value = serde_json::from_str(&*payload).unwrap();
+                normalize_frames!(payload, expected_payload, 2);
+                assert_eq!(expected_payload.to_string(), payload.to_string());
+            }
+        }
+    }
+
+    #[test]
+    fn test_report_error_with_request() {
+        let access_token = std::env::var("ROLLBAR_ACCESS_TOKEN").unwrap_or_else(|_| "ROLLBAR_ACCESS_TOKEN".to_string());
+        let environment = std::env::var("ROLLBAR_ENVIRONMENT").unwrap_or_else(|_| "ROLLBAR_ENVIRONMENT".to_string());
+        let client = Client::new(access_token, environment);
+
+        match "笑".parse::<i32>() {
+            Ok(_) => {
+                assert!(false);
+            }
+            Err(e) => {
+                let originating_request = crate::HttpRequest::new(
+                    &HashMap::from([
+                        ("Mercury".to_owned(), "tiny".to_owned()),
+                        ("Venus".to_owned(), "hot".to_owned()),
+                        ("Earth".to_owned(), "just right".to_owned()),
+                        ("Mars".to_owned(), "doom".to_owned()),
+                    ]),
+                    "GET",
+                    "/the/planets",
+                );
+                let custom = json!(originating_request);
+                let payload = client
+                    .build_report()
+                    .from_error(&e, Some(originating_request), Some(custom))
+                    .with_level(Level::WARNING)
+                    .with_frame(FrameBuilder::new().with_column_number(42).build())
+                    .with_frame(FrameBuilder::new().with_column_number(24).build())
+                    .with_title("w")
+                    .to_string();
+
+                let expected_payload = json!({
+                    "access_token": "ROLLBAR_ACCESS_TOKEN",
+                    "data": {
+                        "environment": "ROLLBAR_ENVIRONMENT",
+                        "body": {
+                            "trace": {
+                                "frames": [{
+                                    "filename": "src/lib.rs",
+                                    "colno": 42
+                                }, {
+                                    "filename": "src/lib.rs",
+                                    "colno": 24
+                                }],
+                                "exception": {
+                                    "class": "core::num::error::ParseIntError",
+                                    "message": "invalid digit found in string",
+                                    "description": "ParseIntError { kind: InvalidDigit }"
+                                }
+                            }
+                        },
+                        "level": "warning",
+                        "language": "rust",
+                        "title": "w",
+                        "request": {
+                            "headers": {
+                                "Earth": "just right",
+                                "Mars": "doom",
+                                "Mercury": "tiny",
+                                "Venus": "hot"
+                            },
+                            "method": "GET",
+                            "url": "/the/planets"
+                        },
+                        "custom": {
+                            "headers": {
+                                "Earth": "just right",
+                                "Mars": "doom",
+                                "Mercury": "tiny",
+                                "Venus": "hot"
+                            },
+                            "method": "GET",
+                            "url": "/the/planets"
+                        }
                     }
                 });
 
@@ -842,8 +981,8 @@ mod tests {
 
     #[test]
     fn test_report_message() {
-        let access_token = std::env::var("ROLLBAR_ACCESS_TOKEN").unwrap_or("".to_string());
-        let environment = std::env::var("ROLLBAR_ENVIRONMENT").unwrap_or("".to_string());
+        let access_token = std::env::var("ROLLBAR_ACCESS_TOKEN").unwrap_or_else(|_| "ROLLBAR_ACCESS_TOKEN".to_string());
+        let environment = std::env::var("ROLLBAR_ENVIRONMENT").unwrap_or_else(|_| "ROLLBAR_ENVIRONMENT".to_string());
         let client = Client::new(access_token, environment);
 
         let payload = client
@@ -871,6 +1010,9 @@ mod tests {
 
     #[test]
     fn test_response() {
+        std::env::set_var("ROLLBAR_ENDPOINT", "https://api.rollbar.com/api/1/item/");
+        std::env::set_var("ROLLBAR_ACCESS_TOKEN", "ROLLBAR_ACCESS_TOKEN");
+        std::env::set_var("ROLLBAR_ENVIRONMENT", "ROLLBAR_ENVIRONMENT");
         let access_token = std::env::var("ROLLBAR_ACCESS_TOKEN").unwrap_or("".to_string());
         let environment = std::env::var("ROLLBAR_ENVIRONMENT").unwrap_or("".to_string());
         let client = Client::new(access_token, environment);
