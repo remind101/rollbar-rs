@@ -36,7 +36,7 @@ fn main() {
                 &std::collections::HashMap::from([
                     ("Mercury".to_owned(), "tiny".to_owned()),
                     ("Venus".to_owned(), "hot".to_owned()),
-                    ("Earth".to_owned(), "just right".to_owned()),
+                    ("Earth".to_owned(), "just right2".to_owned()),
                     ("Mars".to_owned(), "doom".to_owned()),
                 ]),
                 "GET",
@@ -54,7 +54,7 @@ fn main() {
             let originating_request = HttpRequestData::new(
                 &std::collections::HashMap::from([
                     ("Mercury".to_owned(), "tiny".to_owned()),
-                    ("Venus".to_owned(), "hot".to_owned()),
+                    ("Venus".to_owned(), "hot2".to_owned()),
                     ("Earth".to_owned(), "just right".to_owned()),
                     ("Mars".to_owned(), "doom".to_owned()),
                 ]),

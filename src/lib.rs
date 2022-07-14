@@ -3,7 +3,6 @@
 pub extern crate backtrace;
 extern crate futures;
 extern crate hyper;
-extern crate hyper_tls;
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;
@@ -13,14 +12,13 @@ extern crate tokio;
 
 use std::borrow::ToOwned;
 use std::sync::Arc;
-use std::{error, fmt, panic, thread};
+use std::{error, fmt, panic};
 use std::collections::HashMap;
 
 use backtrace::Backtrace;
-use hyper::rt::Future;
-use hyper::{Method, Request};
+use futures::TryFutureExt;
+use hyper::{Body, Method, Request};
 use hyper_tls::HttpsConnector;
-use tokio::runtime::current_thread;
 
 #[derive(Clone, Debug)]
 pub struct ErrorMessage {
@@ -82,7 +80,7 @@ macro_rules! report_error_string {
 /// Report an error, with the request, and custom data.
 /// TODO: Unfortunately Rollbar seems to drop "request" even though it matches documentation
 /// https://explorer.docs.rollbar.com/#operation/create-item
-/// In the interum passing "request" into "custom" does work.
+/// In the interim passing "request" into "custom" does work.
 #[macro_export]
 macro_rules! report_error_with_request {
     ($err:expr, $request:expr, $custom:expr) => {{
@@ -109,7 +107,7 @@ macro_rules! report_error_with_request {
 /// Report an error string, with the request, and custom data.
 /// TODO: Unfortunately Rollbar seems to drop "request" even though it matches documentation
 /// https://explorer.docs.rollbar.com/#operation/create-item
-/// In the interum passing "request" into "custom" does work.
+/// In the interim passing "request" into "custom" does work.
 #[macro_export]
 macro_rules! report_error_string_with_request {
     ($err:expr, $request:expr, $custom:expr) => {{
@@ -225,14 +223,6 @@ impl ToString for Level {
 /// Builder for a generic request to Rollbar.
 pub struct ReportBuilder<'a> {
     client: &'a Client,
-    send_strategy: Option<
-        Box<
-            dyn Fn(
-                Arc<hyper::Client<hyper_tls::HttpsConnector<hyper::client::HttpConnector>>>,
-                String,
-            ) -> thread::JoinHandle<Option<ResponseStatus>>,
-        >,
-    >,
 }
 
 /// Wrapper for a trace, payload of a single exception.
@@ -392,16 +382,9 @@ impl<'a> ReportErrorBuilder<'a> {
     add_generic_field!(with_title, title, Into<String>);
 
     // Send the report to Rollbar.
-    pub fn send(&mut self) -> thread::JoinHandle<Option<ResponseStatus>> {
+    pub fn send(&mut self) -> tokio::task::JoinHandle<Option<ResponseStatus>> {
         let client = self.report_builder.client;
-
-        match self.report_builder.send_strategy {
-            Some(ref send_strategy) => {
-                let http_client = client.http_client.to_owned();
-                send_strategy(http_client, self.to_string())
-            }
-            None => client.send(self.to_string()),
-        }
+        client.send(self.to_string())
     }
 }
 
@@ -446,16 +429,9 @@ impl<'a> ReportMessageBuilder<'a> {
     add_generic_field!(with_level, level, Into<Level>);
 
     // Send the message to Rollbar.
-    pub fn send(&mut self) -> thread::JoinHandle<Option<ResponseStatus>> {
+    pub fn send(&mut self) -> tokio::task::JoinHandle<Option<ResponseStatus>> {
         let client = self.report_builder.client;
-
-        match self.report_builder.send_strategy {
-            Some(ref send_strategy) => {
-                let http_client = client.http_client.to_owned();
-                send_strategy(http_client, self.to_string())
-            }
-            None => client.send(self.to_string()),
-        }
+        client.send(self.to_string())
     }
 }
 
@@ -484,6 +460,7 @@ impl<'a> ToString for ReportMessageBuilder<'a> {
 
 impl<'a> ReportBuilder<'a> {
     /// To be used when a panic report must be sent.
+    #[allow(clippy::wrong_self_convention)]
     pub fn from_panic(&'a mut self, panic_info: &'a panic::PanicInfo) -> ReportErrorBuilder<'a> {
         let mut trace = Trace::default();
 
@@ -567,23 +544,11 @@ impl<'a> ReportBuilder<'a> {
             level: None,
         }
     }
-
-    // Use given function to send a request to Rollbar instead of the built-in one.
-    add_field!(
-        with_send_strategy,
-        send_strategy,
-        Box<
-            dyn Fn(
-                Arc<hyper::Client<hyper_tls::HttpsConnector<hyper::client::HttpConnector>>>,
-                String,
-            ) -> thread::JoinHandle<Option<ResponseStatus>>,
-        >
-    );
 }
 
 /// The access point to the library.
 pub struct Client {
-    http_client: Arc<hyper::Client<hyper_tls::HttpsConnector<hyper::client::HttpConnector>>>,
+    http_client: Arc<hyper::Client<HttpsConnector<hyper::client::HttpConnector>>>,
     access_token: String,
     environment: String,
 }
@@ -597,8 +562,9 @@ impl Client {
     /// You can get the `access_token` at
     /// <https://rollbar.com/{your_organization}/{your_app}/settings/access_tokens>.
     pub fn new<T: Into<String>>(access_token: T, environment: T) -> Client {
-        let https = HttpsConnector::new(4).expect("TLS initialization failed");
-        let client = hyper::Client::builder().build::<_, hyper::Body>(https);
+        let https = HttpsConnector::new();
+        let client = hyper::Client::builder()
+            .build::<_, Body>(https);
 
         Client {
             http_client: Arc::new(client),
@@ -611,37 +577,44 @@ impl Client {
     pub fn build_report(&self) -> ReportBuilder {
         ReportBuilder {
             client: self,
-            send_strategy: None,
         }
     }
 
-    /// Function used internally to send payloads to Rollbar as default `send_strategy`.
-    fn send(&self, payload: String) -> thread::JoinHandle<Option<ResponseStatus>> {
+    /// Function used internally to send payloads to Rollbar.
+    fn send(&self, payload: String) -> tokio::task::JoinHandle<Option<ResponseStatus>> {
         let body = hyper::Body::from(payload);
         let url = std::env::var("ROLLBAR_ENDPOINT").unwrap_or_else(|_| "".to_string());
+        if url.len() == 0 {
+            // we should log that the environment variable is missing on load, but dont spew after that
+            return tokio::task::spawn(
+                async move {
+                    None::<ResponseStatus>
+                }
+            );
+        }
         let request = Request::builder()
             .method(Method::POST)
             .uri(url)
             .body(body)
             .expect("Cannot build post request!");
 
-        let job = self
+        let response_future = self
             .http_client
             .request(request)
-            .map(|res| Some(ResponseStatus::from(res.status())))
+            .map_ok(|res| {
+                Some(ResponseStatus::from(res.status()))
+            })
             .map_err(|error| {
                 println!("Error while sending a report to Rollbar.");
                 print!("The error returned by Rollbar was: {:?}.\n\n", error);
-
                 None::<ResponseStatus>
             });
 
-        thread::spawn(move || {
-            current_thread::Runtime::new()
-                .unwrap()
-                .block_on(job)
-                .unwrap()
-        })
+        tokio::task::spawn(
+            async move {
+                response_future.await.ok().flatten()
+            }
+        )
     }
 }
 
@@ -1023,8 +996,8 @@ mod tests {
         assert_eq!(payload, expected_payload);
     }
 
-    #[test]
-    fn test_response() {
+    #[tokio::test]
+    async fn test_response() {
         std::env::set_var("ROLLBAR_ENDPOINT", "https://api.rollbar.com/api/1/item/");
         std::env::set_var("ROLLBAR_ACCESS_TOKEN", "ROLLBAR_ACCESS_TOKEN");
         std::env::set_var("ROLLBAR_ENVIRONMENT", "ROLLBAR_ENVIRONMENT");
@@ -1038,7 +1011,7 @@ mod tests {
             .with_level("info")
             .send();
 
-        match status_handle.join().unwrap() {
+        match status_handle.await.unwrap() {
             Some(status) => {
                 assert_eq!(
                     status.to_string(),
