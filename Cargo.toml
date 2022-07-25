@@ -1,7 +1,8 @@
 [package]
 name    = "rollbar"
-version = "0.7.0"
-authors = ["Giovanni Capuano <webmaster@giovannicapuano.net"]
+version = "0.7.1"
+authors = ["Benjamin Rubinger <benjaminrubinger@remind101.com>"]
+edition = '2021'
 
 repository  = "https://github.com/RoxasShadow/rollbar-rs"
 license     = "BSD-2-Clause"
@@ -11,13 +12,10 @@ keywords    = ["rollbar", "logging", "errors", "exceptions"]
 
 [dependencies]
 backtrace = "0.3"
-
-hyper = "0.12"
-hyper-tls = "0.3"
-
-tokio="0.1"
-futures="0.1"
-
+futures = "0.3"
+hyper = { version = "0.14", features = ["full"] }
+hyper-tls = "0.5"
 serde = "1.0"
 serde_json = "1.0"
 serde_derive = "1.0"
+tokio = { version = "1", features = ["full"] }

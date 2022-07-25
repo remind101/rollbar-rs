@@ -2,11 +2,13 @@
 extern crate rollbar;
 extern crate backtrace;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let access_token = std::env::var("ROLLBAR_ACCESS_TOKEN").unwrap_or("".to_string());
     let environment = std::env::var("ROLLBAR_ENVIRONMENT").unwrap_or("".to_string());
     let client = rollbar::Client::new(access_token, environment);
-    let _ = report_error_message!(client, "＿|￣|○").join();
+    let result = report_error_message!(client, "＿|￣|○").await;
+    println!("{:#?}", result);
 
     /* // `report_error_message!` expands to the following code:
      * let backtrace = backtrace::Backtrace::new();
