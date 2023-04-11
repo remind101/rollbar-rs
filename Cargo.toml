@@ -1,14 +1,14 @@
 [package]
-name    = "rollbar"
+name = "rollbar"
 version = "0.7.1"
 authors = ["Benjamin Rubinger <benjaminrubinger@remind101.com>"]
 edition = '2021'
 
-repository  = "https://github.com/RoxasShadow/rollbar-rs"
-license     = "BSD-2-Clause"
+repository = "https://github.com/RoxasShadow/rollbar-rs"
+license = "BSD-2-Clause"
 
 description = "Track and report errors, exceptions and messages from your Rust application to Rollbar."
-keywords    = ["rollbar", "logging", "errors", "exceptions"]
+keywords = ["rollbar", "logging", "errors", "exceptions"]
 
 [dependencies]
 backtrace = "0.3"
