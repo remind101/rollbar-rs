@@ -11,11 +11,22 @@ description = "Track and report errors, exceptions and messages from your Rust a
 keywords = ["rollbar", "logging", "errors", "exceptions"]
 
 [dependencies]
-backtrace = "0.3"
-futures = "0.3"
-hyper = { version = "0.14", features = ["full"] }
-hyper-rustls = "0.24"
-serde = "1.0"
-serde_json = "1.0"
-serde_derive = "1.0"
-tokio = { version = "1", features = ["full"] }
+backtrace = { version = "0.3", default-features = false, features = ["std"] }
+futures = { version = "0.3", default-features = false }
+hyper = { version = "0.14", default-features = false, features = [
+  "client",
+  "http1",
+  "tcp",
+] }
+hyper-rustls = { version = "0.24", default-features = false, features = [
+  "http1",
+  "rustls-native-certs",
+  "tokio-runtime",
+] }
+serde = { version = "1", default-features = false }
+serde_json = { version = "1", default-features = false, features = ["std"] }
+serde_derive = { version = "1", default-features = false }
+tokio = { version = "1", features = ["io-std"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
