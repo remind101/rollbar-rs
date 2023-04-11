@@ -1,21 +1,32 @@
 [package]
-name    = "rollbar"
+name = "rollbar"
 version = "0.7.1"
 authors = ["Benjamin Rubinger <benjaminrubinger@remind101.com>"]
 edition = '2021'
 
-repository  = "https://github.com/RoxasShadow/rollbar-rs"
-license     = "BSD-2-Clause"
+repository = "https://github.com/RoxasShadow/rollbar-rs"
+license = "BSD-2-Clause"
 
 description = "Track and report errors, exceptions and messages from your Rust application to Rollbar."
-keywords    = ["rollbar", "logging", "errors", "exceptions"]
+keywords = ["rollbar", "logging", "errors", "exceptions"]
 
 [dependencies]
-backtrace = "0.3"
-futures = "0.3"
-hyper = { version = "0.14", features = ["full"] }
-hyper-tls = "0.5"
-serde = "1.0"
-serde_json = "1.0"
-serde_derive = "1.0"
-tokio = { version = "1", features = ["full"] }
+backtrace = { version = "0.3", default-features = false, features = ["std"] }
+futures = { version = "0.3", default-features = false }
+hyper = { version = "0.14", default-features = false, features = [
+  "client",
+  "http1",
+  "tcp",
+] }
+hyper-rustls = { version = "0.24", default-features = false, features = [
+  "http1",
+  "rustls-native-certs",
+  "tokio-runtime",
+] }
+serde = { version = "1", default-features = false }
+serde_json = { version = "1", default-features = false, features = ["std"] }
+serde_derive = { version = "1", default-features = false }
+tokio = { version = "1", features = ["io-std"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

@@ -1,0 +1,74 @@
+version: 2.1
+_locals:
+  defaults: &defaults
+    resource_class: xlarge
+    machine:
+      image: ubuntu-2204:2023.02.1
+      docker_layer_caching: true
+  environment: &environment
+    # The cache is only keyed on Cargo.lock, so we can't really do
+    # incremental builds; disabling it avoids the overhead.
+    CARGO_INCREMENTAL: "false"
+  cache_paths: &cache_paths
+    # https://doc.rust-lang.org/cargo/guide/cargo-home.html#caching-the-cargo-home-in-ci
+    - /home/circleci/.cargo/bin/
+    - /home/circleci/.cargo/registry/index/
+    - /home/circleci/.cargo/registry/cache/
+    - /home/circleci/.cargo/git/db/
+workflows:
+  build-and-test:
+    jobs:
+      - test-dynamic
+      - test-static
+commands:
+  install_rust:
+    steps:
+      - run:
+          name: Install rust
+          command: |
+            sudo wget -O /usr/local/bin/rustup-init \
+              https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init
+            sudo chmod +x /usr/local/bin/rustup-init
+            rustup-init -y
+            source "$HOME/.cargo/env"
+            rustup install nightly
+jobs:
+  test-dynamic:
+    <<: *defaults
+    steps:
+      - checkout
+      - install_rust
+      - restore_cache:
+          keys:
+            - v1-debug-dynamic-{{ arch }}-{{ checksum "Cargo.lock" }}
+      - run: make build
+      - run: make release
+      - run: make lint
+      # Build test bins so we can cache it.
+      - run: make build-test
+      - save_cache:
+          key: v1-debug-dynamic-{{ arch }}-{{ checksum "Cargo.lock" }}
+          paths: *cache_paths
+      - run: make test
+  test-static:
+    <<: *defaults
+    environment:
+      <<: *environment
+      # These instruct the cargo to perform static builds.
+      RUSTFLAGS: "-C target-feature=+crt-static"
+      CARGO_BUILD_TARGET: "x86_64-unknown-linux-gnu"
+    steps:
+      - checkout
+      - install_rust
+      - restore_cache:
+          keys:
+            - v1-debug-static-{{ arch }}-{{ checksum "Cargo.lock" }}
+      - run: make build
+      - run: make release
+      - run: make lint
+      # Build test bins so we can cache it.
+      - run: make build-test
+      - save_cache:
+          key: v1-debug-static-{{ arch }}-{{ checksum "Cargo.lock" }}
+          paths: *cache_paths
+      - run: make test

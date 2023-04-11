@@ -11,14 +11,14 @@ extern crate serde_json;
 extern crate tokio;
 
 use std::borrow::ToOwned;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::{error, fmt, panic};
-use std::collections::HashMap;
 
 use backtrace::Backtrace;
 use futures::TryFutureExt;
 use hyper::{Body, Method, Request};
-use hyper_tls::HttpsConnector;
+use hyper_rustls::{HttpsConnector, HttpsConnectorBuilder};
 
 #[derive(Clone, Debug)]
 pub struct ErrorMessage {
@@ -26,6 +26,7 @@ pub struct ErrorMessage {
 }
 
 impl ErrorMessage {
+    #[must_use]
     pub fn new(new_description: &str) -> ErrorMessage {
         ErrorMessage {
             description: new_description.to_string(),
@@ -79,7 +80,7 @@ macro_rules! report_error_string {
 
 /// Report an error, with the request, and custom data.
 /// TODO: Unfortunately Rollbar seems to drop "request" even though it matches documentation
-/// https://explorer.docs.rollbar.com/#operation/create-item
+/// <https://explorer.docs.rollbar.com/#operation/create-item>
 /// In the interim passing "request" into "custom" does work.
 #[macro_export]
 macro_rules! report_error_with_request {
@@ -106,7 +107,7 @@ macro_rules! report_error_with_request {
 
 /// Report an error string, with the request, and custom data.
 /// TODO: Unfortunately Rollbar seems to drop "request" even though it matches documentation
-/// https://explorer.docs.rollbar.com/#operation/create-item
+/// <https://explorer.docs.rollbar.com/#operation/create-item>
 /// In the interim passing "request" into "custom" does work.
 #[macro_export]
 macro_rules! report_error_string_with_request {
@@ -167,21 +168,21 @@ macro_rules! report_message {
 }
 
 macro_rules! add_field {
-    ($n:ident, $f:ident, $t:ty) => (
+    ($n:ident, $f:ident, $t:ty) => {
         pub fn $n(&mut self, val: $t) -> &mut Self {
             self.$f = Some(val);
             self
         }
-    );
+    };
 }
 
 macro_rules! add_generic_field {
-    ($n:ident, $f:ident, $t:path) => (
+    ($n:ident, $f:ident, $t:path) => {
         pub fn $n<T: $t>(&mut self, val: T) -> &mut Self {
             self.$f = Some(val.into());
             self
         }
-    );
+    };
 }
 
 /// Variants for setting the severity level.
@@ -258,6 +259,7 @@ pub struct HttpRequestData {
 }
 
 impl HttpRequestData {
+    #[must_use]
     pub fn new(new_headers: &HashMap<String, String>, new_method: &str, new_url: &str) -> HttpRequestData {
         HttpRequestData {
             headers: new_headers.clone(),
@@ -291,6 +293,7 @@ pub struct FrameBuilder {
 }
 
 impl<'a> FrameBuilder {
+    #[must_use]
     pub fn new() -> Self {
         FrameBuilder {
             file_name: file!().to_owned(),
@@ -314,8 +317,9 @@ impl<'a> FrameBuilder {
     add_generic_field!(with_function_name, function_name, Into<String>);
 
     // Conclude the creation of the frame.
+    #[must_use]
     pub fn build(&self) -> Self {
-        self.to_owned()
+        self.clone()
     }
 }
 
@@ -352,15 +356,15 @@ impl<'a> ReportErrorBuilder<'a> {
             backtrace
                 .frames()
                 .iter()
-                .flat_map(|frames| frames.symbols())
+                .flat_map(backtrace::BacktraceFrame::symbols)
                 .map(|symbol|
                     // http://alexcrichton.com/backtrace-rs/backtrace/struct.Symbol.html
                     FrameBuilder {
                         file_name: symbol.filename()
-                            .map_or_else(|| "".to_owned(), |p| format!("{}", p.display())),
+                            .map_or_else(String::new, |p| format!("{}", p.display())),
                         line_number: symbol.lineno(),
                         function_name: symbol.name()
-                            .map(|s| format!("{}", s)),
+                            .map(|s| format!("{s}")),
                         ..Default::default()
                     })
                 .collect::<Vec<FrameBuilder>>(),
@@ -399,8 +403,7 @@ impl<'a> ToString for ReportErrorBuilder<'a> {
                 "body": {
                     "trace": self.trace,
                 },
-                "level": self.level
-                    .to_owned()
+                "level": self.level.clone()
                     .unwrap_or(Level::ERROR)
                     .to_string(),
                 "language": "rust",
@@ -448,8 +451,7 @@ impl<'a> ToString for ReportMessageBuilder<'a> {
                         "body": self.message
                     }
                 },
-                "level": self.level
-                    .to_owned()
+                "level": self.level.clone()
                     .unwrap_or(Level::INFO)
                     .to_string()
             }
@@ -474,7 +476,7 @@ impl<'a> ReportBuilder<'a> {
         };
         trace.exception.class = "<panic>".to_owned();
         trace.exception.message = message.to_owned();
-        trace.exception.description = trace.exception.message.to_owned();
+        trace.exception.description = trace.exception.message.clone();
 
         if let Some(location) = panic_info.location() {
             trace.frames.push(FrameBuilder {
@@ -490,41 +492,43 @@ impl<'a> ReportBuilder<'a> {
             level: None,
             title: Some(message.to_owned()),
             request: None,
-            custom: None
+            custom: None,
         }
     }
 
     // TODO: remove self?
     /// To be used when an `error::Error` must be reported.
-    pub fn from_error<E: error::Error>(&'a mut self, error: &'a E, request: Option<HttpRequestData>, custom: Option<serde_json::Value>) -> ReportErrorBuilder<'a> {
+    pub fn from_error<E: error::Error>(
+        &'a mut self,
+        error: &'a E,
+        request: Option<HttpRequestData>,
+        custom: Option<serde_json::Value>,
+    ) -> ReportErrorBuilder<'a> {
         let mut trace = Trace::default();
         trace.exception.class = std::any::type_name::<E>().to_owned();
         trace.exception.message = error.to_string();
         trace.exception.description = error
             .source()
-            .map_or_else(|| format!("{:?}", error), |c| format!("{:?}", c));
+            .map_or_else(|| format!("{error:?}"), |c| format!("{c:?}"));
 
         ReportErrorBuilder {
             report_builder: self,
             trace,
             level: None,
-            title: Some(format!("{}", error)),
+            title: Some(format!("{error}")),
             request,
-            custom
+            custom,
         }
     }
 
     /// To be used when a error message must be reported.
-    pub fn from_error_message<T: fmt::Display>(
-        &'a mut self,
-        error_message: &'a T,
-    ) -> ReportErrorBuilder<'a> {
-        let message = format!("{}", error_message);
+    pub fn from_error_message<T: fmt::Display>(&'a mut self, error_message: &'a T) -> ReportErrorBuilder<'a> {
+        let message = format!("{error_message}");
 
         let mut trace = Trace::default();
         trace.exception.class = std::any::type_name::<T>().to_owned();
-        trace.exception.message = message.to_owned();
-        trace.exception.description = message.to_owned();
+        trace.exception.message = message.clone();
+        trace.exception.description = message.clone();
 
         ReportErrorBuilder {
             report_builder: self,
@@ -532,7 +536,7 @@ impl<'a> ReportBuilder<'a> {
             level: None,
             title: Some(message),
             request: None,
-            custom: None
+            custom: None,
         }
     }
 
@@ -562,9 +566,12 @@ impl Client {
     /// You can get the `access_token` at
     /// <https://rollbar.com/{your_organization}/{your_app}/settings/access_tokens>.
     pub fn new<T: Into<String>>(access_token: T, environment: T) -> Client {
-        let https = HttpsConnector::new();
-        let client = hyper::Client::builder()
-            .build::<_, Body>(https);
+        let https = HttpsConnectorBuilder::new()
+            .with_native_roots()
+            .https_only()
+            .enable_http1()
+            .build();
+        let client = hyper::Client::builder().build::<_, Body>(https);
 
         Client {
             http_client: Arc::new(client),
@@ -574,23 +581,18 @@ impl Client {
     }
 
     /// Create a `ReportBuilder` to build a new report for Rollbar.
+    #[must_use]
     pub fn build_report(&self) -> ReportBuilder {
-        ReportBuilder {
-            client: self,
-        }
+        ReportBuilder { client: self }
     }
 
     /// Function used internally to send payloads to Rollbar.
     fn send(&self, payload: String) -> tokio::task::JoinHandle<Option<ResponseStatus>> {
         let body = hyper::Body::from(payload);
-        let url = std::env::var("ROLLBAR_ENDPOINT").unwrap_or_else(|_| "".to_string());
-        if url.len() == 0 {
+        let url = std::env::var("ROLLBAR_ENDPOINT").unwrap_or_else(|_| String::new());
+        if url.is_empty() {
             // we should log that the environment variable is missing on load, but dont spew after that
-            return tokio::task::spawn(
-                async move {
-                    None::<ResponseStatus>
-                }
-            );
+            return tokio::task::spawn(async move { None::<ResponseStatus> });
         }
         let request = Request::builder()
             .method(Method::POST)
@@ -601,20 +603,14 @@ impl Client {
         let response_future = self
             .http_client
             .request(request)
-            .map_ok(|res| {
-                Some(ResponseStatus::from(res.status()))
-            })
+            .map_ok(|res| Some(ResponseStatus::from(res.status())))
             .map_err(|error| {
                 println!("Error while sending a report to Rollbar.");
-                print!("The error returned by Rollbar was: {:?}.\n\n", error);
+                print!("The error returned by Rollbar was: {error:?}.\n\n");
                 None::<ResponseStatus>
             });
 
-        tokio::task::spawn(
-            async move {
-                response_future.await.ok().flatten()
-            }
-        )
+        tokio::task::spawn(async move { response_future.await.ok().flatten() })
     }
 }
 
@@ -630,6 +626,7 @@ impl From<hyper::StatusCode> for ResponseStatus {
 
 impl ResponseStatus {
     /// Return a description provided by Rollbar for the status code returned by each request.
+    #[must_use]
     pub fn description(&self) -> &str {
         match self.0.as_u16() {
             200 => "The item was accepted for processing.",
@@ -645,6 +642,7 @@ impl ResponseStatus {
     }
 
     /// Return the canonical description for the status code returned by each request.
+    #[must_use]
     pub fn canonical_reason(&self) -> String {
         format!("{}", self.0)
     }
@@ -652,12 +650,7 @@ impl ResponseStatus {
 
 impl fmt::Display for ResponseStatus {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "Error {}: {}",
-            self.canonical_reason(),
-            self.description()
-        )
+        write!(f, "Error {}: {}", self.canonical_reason(), self.description())
     }
 }
 
@@ -736,8 +729,10 @@ mod tests {
         {
             let tx = Arc::new(Mutex::new(tx));
 
-            let access_token = std::env::var("ROLLBAR_ACCESS_TOKEN").unwrap_or_else(|_| "ROLLBAR_ACCESS_TOKEN".to_string());
-            let environment = std::env::var("ROLLBAR_ENVIRONMENT").unwrap_or_else(|_| "ROLLBAR_ENVIRONMENT".to_string());
+            let access_token =
+                std::env::var("ROLLBAR_ACCESS_TOKEN").unwrap_or_else(|_| "ROLLBAR_ACCESS_TOKEN".to_string());
+            let environment =
+                std::env::var("ROLLBAR_ENVIRONMENT").unwrap_or_else(|_| "ROLLBAR_ENVIRONMENT".to_string());
             let client = Client::new(access_token, environment);
             panic::set_hook(Box::new(move |panic_info| {
                 let backtrace = Backtrace::new();
@@ -768,7 +763,7 @@ mod tests {
             Err(poisoned) => poisoned.into_inner(),
         };
 
-        let mut payload: Value = serde_json::from_str(&*payload).unwrap();
+        let mut payload: Value = serde_json::from_str(&payload).unwrap();
         let mut expected_payload = json!({
             "access_token": "ROLLBAR_ACCESS_TOKEN",
             "data": {
@@ -793,7 +788,7 @@ mod tests {
             }
         });
 
-        let payload_ = payload.to_owned();
+        let payload_ = payload.clone();
         let line_number = payload_
             .get("data")
             .unwrap()
@@ -822,7 +817,7 @@ mod tests {
             .get_mut(0)
             .unwrap()
             .get_mut("lineno")
-            .unwrap() = line_number.to_owned();
+            .unwrap() = line_number.clone();
 
         normalize_frames!(payload, expected_payload, 1);
         assert_eq!(expected_payload.to_string(), payload.to_string());
@@ -876,7 +871,7 @@ mod tests {
                     }
                 });
 
-                let mut payload: Value = serde_json::from_str(&*payload).unwrap();
+                let mut payload: Value = serde_json::from_str(&payload).unwrap();
                 normalize_frames!(payload, expected_payload, 2);
                 assert_eq!(expected_payload.to_string(), payload.to_string());
             }
@@ -960,7 +955,7 @@ mod tests {
                     }
                 });
 
-                let mut payload: Value = serde_json::from_str(&*payload).unwrap();
+                let mut payload: Value = serde_json::from_str(&payload).unwrap();
                 normalize_frames!(payload, expected_payload, 2);
                 assert_eq!(expected_payload.to_string(), payload.to_string());
             }
@@ -1001,15 +996,11 @@ mod tests {
         std::env::set_var("ROLLBAR_ENDPOINT", "https://api.rollbar.com/api/1/item/");
         std::env::set_var("ROLLBAR_ACCESS_TOKEN", "ROLLBAR_ACCESS_TOKEN");
         std::env::set_var("ROLLBAR_ENVIRONMENT", "ROLLBAR_ENVIRONMENT");
-        let access_token = std::env::var("ROLLBAR_ACCESS_TOKEN").unwrap_or_else(|_| "".to_string());
-        let environment = std::env::var("ROLLBAR_ENVIRONMENT").unwrap_or_else(|_| "".to_string());
+        let access_token = std::env::var("ROLLBAR_ACCESS_TOKEN").unwrap_or_else(|_| String::new());
+        let environment = std::env::var("ROLLBAR_ENVIRONMENT").unwrap_or_else(|_| String::new());
         let client = Client::new(access_token, environment);
 
-        let status_handle = client
-            .build_report()
-            .from_message("hai")
-            .with_level("info")
-            .send();
+        let status_handle = client.build_report().from_message("hai").with_level("info").send();
 
         match status_handle.await.unwrap() {
             Some(status) => {
