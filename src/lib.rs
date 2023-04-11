@@ -18,7 +18,7 @@ use std::{error, fmt, panic};
 use backtrace::Backtrace;
 use futures::TryFutureExt;
 use hyper::{Body, Method, Request};
-use hyper_tls::HttpsConnector;
+use hyper_rustls::{HttpsConnector, HttpsConnectorBuilder};
 
 #[derive(Clone, Debug)]
 pub struct ErrorMessage {
@@ -566,7 +566,11 @@ impl Client {
     /// You can get the `access_token` at
     /// <https://rollbar.com/{your_organization}/{your_app}/settings/access_tokens>.
     pub fn new<T: Into<String>>(access_token: T, environment: T) -> Client {
-        let https = HttpsConnector::new();
+        let https = HttpsConnectorBuilder::new()
+            .with_native_roots()
+            .https_only()
+            .enable_http1()
+            .build();
         let client = hyper::Client::builder().build::<_, Body>(https);
 
         Client {

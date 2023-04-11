@@ -14,7 +14,7 @@ keywords    = ["rollbar", "logging", "errors", "exceptions"]
 backtrace = "0.3"
 futures = "0.3"
 hyper = { version = "0.14", features = ["full"] }
-hyper-tls = "0.5"
+hyper-rustls = "0.24"
 serde = "1.0"
 serde_json = "1.0"
 serde_derive = "1.0"
