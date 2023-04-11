@@ -5,7 +5,9 @@ use rollbar::{ErrorMessage, HttpRequestData};
 
 fn main() {
     match "笑".parse::<i32>() {
-        Ok(_) => { println!("lolnope"); },
+        Ok(_) => {
+            println!("lolnope");
+        }
         Err(e) => {
             let error_string = &e.to_string();
             report_error!(ErrorMessage::new(error_string));
@@ -13,7 +15,9 @@ fn main() {
     }
 
     match "笑".parse::<i32>() {
-        Ok(_) => { println!("lolnope"); },
+        Ok(_) => {
+            println!("lolnope");
+        }
         Err(e) => {
             let error_string = &e.to_string();
             report_error_string!(error_string);
@@ -21,7 +25,9 @@ fn main() {
     }
 
     match "笑".parse::<i32>() {
-        Ok(_) => { println!("lolnope"); },
+        Ok(_) => {
+            println!("lolnope");
+        }
         Err(e) => {
             let error_string = &e.to_string();
             report_error_with_request!(ErrorMessage::new(error_string), None, None);
@@ -29,7 +35,9 @@ fn main() {
     }
 
     match "笑".parse::<i32>() {
-        Ok(_) => { println!("lolnope"); },
+        Ok(_) => {
+            println!("lolnope");
+        }
         Err(e) => {
             let error_string = &e.to_string();
             let originating_request = HttpRequestData::new(
@@ -48,7 +56,9 @@ fn main() {
     }
 
     match "笑".parse::<i32>() {
-        Ok(_) => { println!("lolnope"); },
+        Ok(_) => {
+            println!("lolnope");
+        }
         Err(e) => {
             let error_string = &e.to_string();
             let originating_request = HttpRequestData::new(
